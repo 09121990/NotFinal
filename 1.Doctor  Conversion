@@ -1,0 +1,51 @@
+## Decorate Query
+SELECT 
+    A."Doctor", 
+    A."Advised_Patients", 
+    COALESCE(B."Taken_Patients", 0) AS "Taken_Patients", 
+    COALESCE(B."Taken_Patients" / A."Advised_Patients", 0) AS "Conversion_Rate"
+FROM
+    -- Subquery A: Count of Patients Advised for DHI
+    (
+        SELECT
+            CP."SNAME" AS "Doctor",
+            COUNT(DISTINCT AT."PATID") AS "Advised_Patients"
+        FROM
+            "LTHMS"."ADVICETYPE" AT
+            LEFT JOIN "RECEIPTDETAIL" RD ON RD."BILLNO" = AT."BILLNO"
+            LEFT JOIN "CLINICPERSONNEL" CP ON CP."SID" = RD."SID"
+        WHERE
+            LOWER(AT."OPERATION") LIKE '%dhi%' 
+            AND AT."ADVDATE" BETWEEN TO_DATE('2024-01-01', 'YYYY-MM-DD') 
+                                AND TO_DATE('2024-12-31', 'YYYY-MM-DD')
+        GROUP BY 
+            CP."SNAME"
+    ) A
+LEFT JOIN
+    -- Subquery B: Count of Patients Who Took DHI
+    (
+        SELECT
+            CP."SNAME" AS "Doctor",
+            COUNT(DISTINCT OCD."PATID") AS "Taken_Patients"
+        FROM
+            "LTHMS"."OPTCHARGEDETAIL" OCD
+            LEFT JOIN "CLINICPERSONNEL" CP ON CP."SID" = OCD."SID"
+        WHERE
+            (
+                LOWER(OCD."RPATTYPE") LIKE '%dhi%' 
+                OR OCD."RPATTYPE" IS NULL
+            )
+            AND OCD."PATID" IN (
+                SELECT DISTINCT AT."PATID"
+                FROM "LTHMS"."ADVICETYPE" AT
+                WHERE
+                    LOWER(AT."OPERATION") LIKE '%dhi%' 
+                    AND AT."ADVDATE" BETWEEN TO_DATE('2024-01-01', 'YYYY-MM-DD') 
+                                        AND TO_DATE('2024-12-31', 'YYYY-MM-DD')
+            )
+            AND OCD."BILLDATE" BETWEEN TO_DATE('2024-01-01', 'YYYY-MM-DD') 
+                                  AND TO_DATE('2024-12-31', 'YYYY-MM-DD')
+        GROUP BY 
+            CP."SNAME"
+    ) B 
+    ON A."Doctor" = B."Doctor";
