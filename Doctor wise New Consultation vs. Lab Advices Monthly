@@ -1,0 +1,49 @@
+SELECT 
+    TO_CHAR(B."RCPTDATE", 'YYYY-MM') AS "ReceiptDate", 
+    B."SNAME", 
+    SUM(B."NewConsultations") AS "Count of New Patients", 
+    SUM(NVL(A."LabAdvices", 0)) AS "Count of Lab Advices", 
+    ROUND(
+        CASE 
+            WHEN SUM(B."NewConsultations") > 0 
+            THEN SUM(NVL(A."LabAdvices", 0)) / SUM(B."NewConsultations") 
+            ELSE 0 
+        END, 2
+    ) AS "% of Lab Advices"
+FROM
+(
+    -- Count New Consultations
+    SELECT 
+        "REGISDATE" AS "RCPTDATE",
+        "SNAME",
+        COUNT(DISTINCT "RECEIPTDETAIL"."PATID") AS "NewConsultations"
+    FROM "LTHMS"."PATIENTS"
+    JOIN "LTHMS"."RECEIPTDETAIL" 
+        ON "RECEIPTDETAIL"."PATID" = "PATIENTS"."PATID"
+        AND "RECEIPTDETAIL"."RCPTDATE" = "PATIENTS"."REGISDATE"
+    LEFT JOIN "LTHMS"."CLINICPERSONNEL" 
+        ON "CLINICPERSONNEL"."SID" = "RECEIPTDETAIL"."SID"
+    WHERE "REGISDATE" BETWEEN TO_DATE('2024-01-01', 'YYYY-MM-DD') 
+                              AND TO_DATE('2024-12-31', 'YYYY-MM-DD') 
+    GROUP BY "REGISDATE", "SNAME"
+) B
+LEFT JOIN
+(
+    -- Count Lab Advices
+    SELECT 
+        TRUNC("ADVICETYPE"."ADVDATE", 'DD') AS "ADVDATE",
+        "SNAME",
+        COUNT(*) AS "LabAdvices"
+    FROM "LTHMS"."ADVICETYPE"
+    LEFT JOIN "LTHMS"."RECEIPTDETAIL" 
+        ON "RECEIPTDETAIL"."BILLNO" = "ADVICETYPE"."BILLNO"
+    LEFT JOIN "LTHMS"."CLINICPERSONNEL" 
+        ON "CLINICPERSONNEL"."SID" = "RECEIPTDETAIL"."SID"
+    WHERE "ADVICETYPE"."INVHEADING" = 'Investigation : '
+    GROUP BY TRUNC("ADVICETYPE"."ADVDATE", 'DD'), "SNAME"
+) A 
+ON A."ADVDATE" = B."RCPTDATE" 
+AND A."SNAME" = B."SNAME"
+WHERE B."SNAME" IS NOT NULL
+GROUP BY TO_CHAR(B."RCPTDATE", 'YYYY-MM'), B."SNAME"
+ORDER BY "ReceiptDate" DESC;
