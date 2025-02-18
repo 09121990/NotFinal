@@ -1,0 +1,64 @@
+SELECT
+  CP.SNAME AS "Dr_Name",
+  COUNT(DISTINCT OCD.PATID) AS "Procedure All Patient",
+  COUNT(DISTINCT RD.PATID) AS "Take Procedure from Receive",
+  COALESCE(OCD_TOTAL.NETAMT_SUM, 0) AS "Procedure Amount",
+  COUNT(DISTINCT RD2.PATID) AS "All Patient from Receive",
+  NVL(PNT."NEW_PATIENT",0) AS  "NEW PATIENT" -- Include Patient Count from the subquery
+FROM LTHMS.CLINICPERSONNEL CP
+LEFT JOIN (
+    SELECT 
+        RD.SID AS "Doctor ID",  
+        COUNT(DISTINCT RD.PATID) AS "NEW_PATIENT"  -- Counting distinct patients assigned to each doctor
+    FROM LTHMS.RECEIPTDETAIL RD
+    JOIN LTHMS.PATIENTS PNTS 
+        ON RD.PATID = PNTS.PATID  -- Joining with patients table to apply registration date filter
+    WHERE PNTS.REGISDATE BETWEEN DATE '2025-01-01' AND DATE '2025-01-31'  
+    AND RD.RCPTDATE BETWEEN DATE '2025-01-01' AND DATE '2025-01-31'  
+    AND RD.SID = (
+        -- Subquery: Selecting the first doctor each patient visited
+        SELECT MIN(RD2.SID) KEEP (DENSE_RANK FIRST ORDER BY RD2.RCPTDATE)  
+        FROM LTHMS.RECEIPTDETAIL RD2  
+        WHERE RD2.PATID = RD.PATID  -- Matching the same patient
+        AND RD2.RCPTDATE BETWEEN DATE '2025-01-01' AND DATE '2025-01-31'  -- Considering visits only within the date range
+    )
+    GROUP BY RD.SID  -- Group by doctor ID
+) PNT 
+  ON PNT."Doctor ID" = CP.SID  -- Join the subquery to the main query on SID
+LEFT JOIN (
+    SELECT SID, PATID, NETAMT
+    FROM LTHMS.OPTCHARGEDETAIL
+    WHERE BILLDATE BETWEEN TO_DATE('2025-01-01', 'YYYY-MM-DD') 
+                        AND TO_DATE('2025-01-31', 'YYYY-MM-DD')
+    AND LOWER(RPATTYPE) NOT LIKE '%dhi%'
+) OCD 
+  ON OCD.SID = CP.SID
+LEFT JOIN (
+    SELECT SID, PATID
+    FROM LTHMS.RECEIPTDETAIL
+    WHERE RCPTDATE BETWEEN TO_DATE('2025-01-01', 'YYYY-MM-DD') 
+                        AND TO_DATE('2025-01-31', 'YYYY-MM-DD')
+    GROUP BY SID, PATID
+) RD 
+  ON OCD.SID = RD.SID 
+  AND OCD.PATID = RD.PATID
+LEFT JOIN (
+    SELECT SID, PATID
+    FROM LTHMS.RECEIPTDETAIL
+    WHERE RCPTDATE BETWEEN TO_DATE('2025-01-01', 'YYYY-MM-DD') 
+                        AND TO_DATE('2025-01-31', 'YYYY-MM-DD')
+    GROUP BY SID, PATID
+) RD2 
+  ON CP.SID = RD2.SID  -- Join directly on CP.SID
+LEFT JOIN (
+    SELECT SID, SUM(NETAMT) AS NETAMT_SUM
+    FROM LTHMS.OPTCHARGEDETAIL
+    WHERE BILLDATE BETWEEN TO_DATE('2025-01-01', 'YYYY-MM-DD') 
+                        AND TO_DATE('2025-01-31', 'YYYY-MM-DD')
+    AND LOWER(RPATTYPE) NOT LIKE '%dhi%'
+    GROUP BY SID
+) OCD_TOTAL 
+  ON CP.SID = OCD_TOTAL.SID
+WHERE OCD_TOTAL.NETAMT_SUM <> 0
+GROUP BY CP.SNAME, OCD_TOTAL.NETAMT_SUM, PNT."NEW_PATIENT"  -- Include Patient Count in GROUP BY
+ORDER BY "Procedure Amount" DESC;
